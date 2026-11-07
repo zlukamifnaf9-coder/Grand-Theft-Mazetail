@@ -11,6 +11,7 @@
 </head>
 <body>
 <script>
+// ===== ДАННЫЕ ДИАЛОГОВ =====
 const DIALOGS = {
   citizen: [
     "Горожанин: Оккупанты забрали последний хлеб...",
@@ -31,14 +32,6 @@ const DIALOGS = {
     "Анфиса: Сопротивление собирается. Нам нужно оружие.",
     "Анфиса: Начни с патруля у вокзала."
   ]
-};
-
-const config = {
-  type: Phaser.AUTO,
-  width: 960, height: 540,
-  backgroundColor: '#3a5a40',
-  physics: { default: 'arcade', arcade: { debug: false } },
-  scene: [ WorldScene ]
 };
 
 class WorldScene extends Phaser.Scene {
@@ -167,7 +160,6 @@ class WorldScene extends Phaser.Scene {
     this.updateUI();
 
     const pointer = this.input.activePointer;
-    const cam = this.cameras.main;
     const wx = pointer.worldX, wy = pointer.worldY;
     let dx = wx - this.player.x, dy = wy - this.player.y;
     const len = Math.hypot(dx, dy) || 1;
@@ -189,7 +181,6 @@ class WorldScene extends Phaser.Scene {
       soldier.label.destroy(); soldier.hpBar.destroy(); soldier.destroy();
       this.money += 25;
       this.updateUI();
-      // респавн солдата через 5 сек
       this.time.delayedCall(5000, () => this.spawnSoldier(500 + Math.random()*1000, 300 + Math.random()*800));
     }
   }
@@ -225,7 +216,6 @@ class WorldScene extends Phaser.Scene {
       if (s.label) { s.label.x = s.x; s.label.y = s.y - 24; }
       if (s.hpBar)  { s.hpBar.x = s.x; s.hpBar.y = s.y - 36; }
 
-      // солдат атакует игрока в контакте
       const d = Phaser.Math.Distance.Between(this.player.x, this.player.y, s.x, s.y);
       if (d < 40 && time - this.lastHitBySoldier > 800 && this.invuln < time) {
         this.lastHitBySoldier = time;
@@ -254,6 +244,15 @@ class WorldScene extends Phaser.Scene {
     this.updateUI();
   }
 }
+
+// ===== КОНФИГ И ЗАПУСК (ТЕПЕРЬ В САМОМ НИЗУ) =====
+const config = {
+  type: Phaser.AUTO,
+  width: 960, height: 540,
+  backgroundColor: '#3a5a40',
+  physics: { default: 'arcade', arcade: { debug: false } },
+  scene: [ WorldScene ] 
+};
 
 new Phaser.Game(config);
 </script>
