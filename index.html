@@ -11,7 +11,6 @@
 </head>
 <body>
 <script>
-// ===== ДАННЫЕ ДИАЛОГОВ =====
 const DIALOGS = {
   citizen: [
     "Горожанин: Оккупанты забрали последний хлеб...",
@@ -20,7 +19,8 @@ const DIALOGS = {
   informant: [
     "Информатор: Эйнар! Валахия усилила патрули у ратуши.",
     "Информатор: Захвати офицера — обменяем на оружие.",
-    "Информатор: Анфиса ждёт тебя на площади."
+    "Информатор: Анфиса ждёт тебя на площади.",
+    "Информатор: Патроны? 10 штук за $15. Нажми R рядом со мной."
   ],
   soldier: [
     "Солдат Валахии: Проходи мимо, горожанин.",
@@ -48,14 +48,13 @@ class WorldScene extends Phaser.Scene {
     this.worldW = 2000; this.worldH = 1500;
     this.physics.world.setBounds(0, 0, this.worldW, this.worldH);
 
-    // ---- карта: земля, дороги, дома ----
+    // ---- карта ----
     this.add.rectangle(0,0,this.worldW,this.worldH,0x4a6b4a).setOrigin(0);
     const roads = this.add.graphics();
     roads.fillStyle(0x6b6b6b);
-    roads.fillRect(0, 600, this.worldW, 160);   // горизонтальная
-    roads.fillRect(900, 0, 160, this.worldH);   // вертикальная
+    roads.fillRect(0, 600, this.worldW, 160);
+    roads.fillRect(900, 0, 160, this.worldH);
 
-    // дома с коллизиями
     this.obstacles = this.physics.add.staticGroup();
     const houses = [
       [200,200,180,140],[500,180,160,160],[1200,200,200,140],
@@ -77,34 +76,48 @@ class WorldScene extends Phaser.Scene {
 
     // ---- NPC ----
     this.npcs = this.physics.add.group();
+    this.soldiers = this.physics.add.group();
     this.spawnNPC(700, 680, 0x4a90d9, 'citizen', 'Горожанин');
-    this.spawnNPC(500, 400, 0xd94a4a, 'soldier', 'Солдат');
+    this.spawnSoldier(500, 400);
     this.spawnNPC(1200, 680, 0x9b59b6, 'informant', 'Информатор');
     this.spawnNPC(1400, 1000, 0xe91e63, 'anfisa', 'Анфиса');
-    this.spawnNPC(1600, 500, 0xd94a4a, 'soldier', 'Солдат');
+    this.spawnSoldier(1600, 500);
+
+    // ---- состояние ----
+    this.hp = 100; this.money = 50; this.ammo = 6;
+    this.maxHp = 100; this.lastShot = 0; this.shotCooldown = 300;
+    this.invuln = 0;
+    this.lastHitBySoldier = 0;
 
     // ---- UI ----
-    this.hp = 100; this.money = 50;
     this.uiText = this.add.text(10, 10, '', { font:'16px monospace', color:'#fff' })
       .setScrollFactor(0).setDepth(100);
-    this.hint = this.add.text(480, 510, 'E — говорить', { font:'14px monospace', color:'#ffd166' })
-      .setScrollFactor(0).setOrigin(0.5).setDepth(100);
+    this.add.text(10, 30, 'ЛКМ/Пробел — стрелять | R — патроны у информатора', 
+      { font:'12px monospace', color:'#aaa' }).setScrollFactor(0).setDepth(100);
     this.updateUI();
 
-    // ---- диалоговое окно ----
+    // ---- диалог ----
     this.dialogBox = this.add.rectangle(480, 440, 900, 120, 0x000000, 0.85)
       .setScrollFactor(0).setDepth(200).setVisible(false);
     this.dialogText = this.add.text(60, 400, '', { font:'16px monospace', color:'#fff', wordWrap:{width:840} })
       .setScrollFactor(0).setDepth(201).setVisible(false);
     this.dialogIndex = 0; this.dialogLines = []; this.inDialog = false;
 
-    // ---- камера и управление ----
+    // ---- камера / управление ----
     this.cameras.main.setBounds(0,0,this.worldW,this.worldH);
     this.cameras.main.startFollow(this.player);
     this.cursors = this.input.keyboard.createCursorKeys();
     this.wasd = this.input.keyboard.addKeys('W,A,S,D');
     this.keyE = this.input.keyboard.addKey('E');
     this.keyE.on('down', () => this.interact());
+    this.input.keyboard.addKey('R').on('down', () => this.buyAmmo());
+    this.input.keyboard.addKey('SPACE').on('down', () => this.shoot());
+    this.input.on('pointerdown', () => this.shoot());
+
+    // ---- пули ----
+    this.bullets = this.physics.add.group();
+    this.physics.add.overlap(this.bullets, this.soldiers, (b, s) => this.hitSoldier(b, s));
+    this.physics.add.overlap(this.bullets, this.obstacles, (b) => b.destroy());
   }
 
   spawnNPC(x, y, color, type, name) {
@@ -117,8 +130,68 @@ class WorldScene extends Phaser.Scene {
     return npc;
   }
 
+  spawnSoldier(x, y) {
+    const s = this.add.rectangle(x, y, 26, 26, 0xd94a4a);
+    this.physics.add.existing(s);
+    s.body.setCollideWorldBounds(true);
+    s.soldierHp = 30;
+    s.npcType = 'soldier'; s.npcName = 'Солдат';
+    this.soldiers.add(s);
+    this.npcs.add(s);
+    const label = this.add.text(x, y-24, 'Солдат', { font:'12px monospace', color:'#ff9999' }).setOrigin(0.5);
+    const hpBar = this.add.rectangle(x, y-36, 26, 4, 0xff0000).setOrigin(0.5);
+    s.label = label; s.hpBar = hpBar;
+    return s;
+  }
+
   updateUI() {
-    this.uiText.setText(`HP: ${this.hp} | $: ${this.money} | Глава 1: Освобождение`);
+    this.uiText.setText(`HP: ${this.hp}/${this.maxHp} | $: ${this.money} | Патроны: ${this.ammo} | Глава 1`);
+  }
+
+  buyAmmo() {
+    const inf = this.npcs.getChildren().find(n => n.npcType === 'informant');
+    if (!inf) return;
+    const d = Phaser.Math.Distance.Between(this.player.x, this.player.y, inf.x, inf.y);
+    if (d < 90) {
+      if (this.money >= 15) { this.money -= 15; this.ammo += 10; this.updateUI(); }
+    }
+  }
+
+  shoot() {
+    if (this.inDialog) return;
+    const now = this.time.now;
+    if (now - this.lastShot < this.shotCooldown) return;
+    if (this.ammo <= 0) return;
+    this.lastShot = now;
+    this.ammo--;
+    this.updateUI();
+
+    const pointer = this.input.activePointer;
+    const cam = this.cameras.main;
+    const wx = pointer.worldX, wy = pointer.worldY;
+    let dx = wx - this.player.x, dy = wy - this.player.y;
+    const len = Math.hypot(dx, dy) || 1;
+    dx /= len; dy /= len;
+
+    const bullet = this.add.rectangle(this.player.x, this.player.y, 8, 8, 0xffff00);
+    this.physics.add.existing(bullet);
+    bullet.body.setVelocity(dx * 700, dy * 700);
+    this.bullets.add(bullet);
+    this.time.delayedCall(800, () => { if (bullet.active) bullet.destroy(); });
+  }
+
+  hitSoldier(bullet, soldier) {
+    if (!bullet.active) return;
+    bullet.destroy();
+    soldier.soldierHp -= 10;
+    soldier.hpBar.width = 26 * Math.max(0, soldier.soldierHp / 30);
+    if (soldier.soldierHp <= 0) {
+      soldier.label.destroy(); soldier.hpBar.destroy(); soldier.destroy();
+      this.money += 25;
+      this.updateUI();
+      // респавн солдата через 5 сек
+      this.time.delayedCall(5000, () => this.spawnSoldier(500 + Math.random()*1000, 300 + Math.random()*800));
+    }
   }
 
   interact() {
@@ -146,7 +219,20 @@ class WorldScene extends Phaser.Scene {
     }
   }
 
-  update() {
+  update(time) {
+    // движение меток солдат
+    this.soldiers.getChildren().forEach(s => {
+      if (s.label) { s.label.x = s.x; s.label.y = s.y - 24; }
+      if (s.hpBar)  { s.hpBar.x = s.x; s.hpBar.y = s.y - 36; }
+
+      // солдат атакует игрока в контакте
+      const d = Phaser.Math.Distance.Between(this.player.x, this.player.y, s.x, s.y);
+      if (d < 40 && time - this.lastHitBySoldier > 800 && this.invuln < time) {
+        this.lastHitBySoldier = time;
+        this.damagePlayer(10);
+      }
+    });
+
     if (this.inDialog) { this.player.body.setVelocity(0); return; }
     const speed = 200, b = this.player.body;
     b.setVelocity(0);
@@ -155,6 +241,17 @@ class WorldScene extends Phaser.Scene {
     if (this.cursors.up.isDown || this.wasd.W.isDown)    b.setVelocityY(-speed);
     if (this.cursors.down.isDown || this.wasd.S.isDown)  b.setVelocityY(speed);
     b.velocity.normalize().scale(speed);
+  }
+
+  damagePlayer(amount) {
+    this.hp -= amount;
+    if (this.hp <= 0) {
+      this.hp = this.maxHp;
+      this.money = Math.max(0, this.money - 20);
+      this.player.x = 980; this.player.y = 680;
+      this.cameras.main.shake(200, 0.01);
+    }
+    this.updateUI();
   }
 }
 
