@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<title>Эйнар — Глава 1</title>
+<script src="https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js"></script>
+<style>
+  body { margin:0; background:#111; display:flex; justify-content:center; align-items:center; height:100vh; }
+  canvas { image-rendering: pixelated; }
+</style>
+</head>
+<body>
+<script>
+// ===== ДАННЫЕ ДИАЛОГОВ =====
+const DIALOGS = {
+  citizen: [
+    "Горожанин: Оккупанты забрали последний хлеб...",
+    "Горожанин: Говорят, у телеграфа есть связной сопротивления."
+  ],
+  informant: [
+    "Информатор: Эйнар! Валахия усилила патрули у ратуши.",
+    "Информатор: Захвати офицера — обменяем на оружие.",
+    "Информатор: Анфиса ждёт тебя на площади."
+  ],
+  soldier: [
+    "Солдат Валахии: Проходи мимо, горожанин.",
+    "Солдат Валахии: Ещё раз увижу — арестую."
+  ],
+  anfisa: [
+    "Анфиса: Эйнар, ты цел?",
+    "Анфиса: Сопротивление собирается. Нам нужно оружие.",
+    "Анфиса: Начни с патруля у вокзала."
+  ]
+};
+
+const config = {
+  type: Phaser.AUTO,
+  width: 960, height: 540,
+  backgroundColor: '#3a5a40',
+  physics: { default: 'arcade', arcade: { debug: false } },
+  scene: [ WorldScene ]
+};
+
+class WorldScene extends Phaser.Scene {
+  constructor() { super('World'); }
+
+  create() {
+    this.worldW = 2000; this.worldH = 1500;
+    this.physics.world.setBounds(0, 0, this.worldW, this.worldH);
+
+    // ---- карта: земля, дороги, дома ----
+    this.add.rectangle(0,0,this.worldW,this.worldH,0x4a6b4a).setOrigin(0);
+    const roads = this.add.graphics();
+    roads.fillStyle(0x6b6b6b);
+    roads.fillRect(0, 600, this.worldW, 160);   // горизонтальная
+    roads.fillRect(900, 0, 160, this.worldH);   // вертикальная
+
+    // дома с коллизиями
+    this.obstacles = this.physics.add.staticGroup();
+    const houses = [
+      [200,200,180,140],[500,180,160,160],[1200,200,200,140],
+      [300,900,200,160],[700,950,180,140],[1300,900,220,160],
+      [1500,300,180,180],[1500,1100,200,160]
+    ];
+    houses.forEach(([x,y,w,h]) => {
+      this.add.rectangle(x+w/2,y+h/2,w,h,0x8b5a2b).setStrokeStyle(3,0x5a3a1a);
+      const o = this.add.rectangle(x+w/2,y+h/2,w,h);
+      this.physics.add.existing(o, true);
+      this.obstacles.add(o);
+    });
+
+    // ---- игрок ----
+    this.player = this.add.rectangle(980, 680, 26, 26, 0xd4a373);
+    this.physics.add.existing(this.player);
+    this.player.body.setCollideWorldBounds(true);
+    this.physics.add.collider(this.player, this.obstacles);
+
+    // ---- NPC ----
+    this.npcs = this.physics.add.group();
+    this.spawnNPC(700, 680, 0x4a90d9, 'citizen', 'Горожанин');
+    this.spawnNPC(500, 400, 0xd94a4a, 'soldier', 'Солдат');
+    this.spawnNPC(1200, 680, 0x9b59b6, 'informant', 'Информатор');
+    this.spawnNPC(1400, 1000, 0xe91e63, 'anfisa', 'Анфиса');
+    this.spawnNPC(1600, 500, 0xd94a4a, 'soldier', 'Солдат');
+
+    // ---- UI ----
+    this.hp = 100; this.money = 50;
+    this.uiText = this.add.text(10, 10, '', { font:'16px monospace', color:'#fff' })
+      .setScrollFactor(0).setDepth(100);
+    this.hint = this.add.text(480, 510, 'E — говорить', { font:'14px monospace', color:'#ffd166' })
+      .setScrollFactor(0).setOrigin(0.5).setDepth(100);
+    this.updateUI();
+
+    // ---- диалоговое окно ----
+    this.dialogBox = this.add.rectangle(480, 440, 900, 120, 0x000000, 0.85)
+      .setScrollFactor(0).setDepth(200).setVisible(false);
+    this.dialogText = this.add.text(60, 400, '', { font:'16px monospace', color:'#fff', wordWrap:{width:840} })
+      .setScrollFactor(0).setDepth(201).setVisible(false);
+    this.dialogIndex = 0; this.dialogLines = []; this.inDialog = false;
+
+    // ---- камера и управление ----
+    this.cameras.main.setBounds(0,0,this.worldW,this.worldH);
+    this.cameras.main.startFollow(this.player);
+    this.cursors = this.input.keyboard.createCursorKeys();
+    this.wasd = this.input.keyboard.addKeys('W,A,S,D');
+    this.keyE = this.input.keyboard.addKey('E');
+    this.keyE.on('down', () => this.interact());
+  }
+
+  spawnNPC(x, y, color, type, name) {
+    const npc = this.add.rectangle(x, y, 24, 24, color);
+    this.physics.add.existing(npc);
+    npc.body.setImmovable(true);
+    npc.npcType = type; npc.npcName = name;
+    this.npcs.add(npc);
+    this.add.text(x, y-22, name, { font:'12px monospace', color:'#fff' }).setOrigin(0.5);
+    return npc;
+  }
+
+  updateUI() {
+    this.uiText.setText(`HP: ${this.hp} | $: ${this.money} | Глава 1: Освобождение`);
+  }
+
+  interact() {
+    if (this.inDialog) { this.nextDialogLine(); return; }
+    const near = this.npcs.getChildren().find(n =>
+      Phaser.Math.Distance.Between(this.player.x, this.player.y, n.x, n.y) < 70
+    );
+    if (near) this.startDialog(DIALOGS[near.npcType] || ["..."]);
+  }
+
+  startDialog(lines) {
+    this.dialogLines = lines; this.dialogIndex = 0; this.inDialog = true;
+    this.dialogBox.setVisible(true); this.dialogText.setVisible(true);
+    this.dialogText.setText(lines[0]);
+  }
+
+  nextDialogLine() {
+    this.dialogIndex++;
+    if (this.dialogIndex >= this.dialogLines.length) {
+      this.dialogBox.setVisible(false);
+      this.dialogText.setVisible(false);
+      this.inDialog = false;
+    } else {
+      this.dialogText.setText(this.dialogLines[this.dialogIndex]);
+    }
+  }
+
+  update() {
+    if (this.inDialog) { this.player.body.setVelocity(0); return; }
+    const speed = 200, b = this.player.body;
+    b.setVelocity(0);
+    if (this.cursors.left.isDown || this.wasd.A.isDown)  b.setVelocityX(-speed);
+    if (this.cursors.right.isDown || this.wasd.D.isDown) b.setVelocityX(speed);
+    if (this.cursors.up.isDown || this.wasd.W.isDown)    b.setVelocityY(-speed);
+    if (this.cursors.down.isDown || this.wasd.S.isDown)  b.setVelocityY(speed);
+    b.velocity.normalize().scale(speed);
+  }
+}
+
+new Phaser.Game(config);
+</script>
+</body>
+</html>
